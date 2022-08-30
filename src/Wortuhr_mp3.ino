@@ -5545,8 +5545,8 @@ delay(0);
 #if defined(SunRiseLib) || defined(APIKEY)
   message += F("<tr><td>"
     "Ank&uuml;ndigung - <br>"
-    "Sonneaufgang:<br>"
-    "Sonneuntergang:"
+    "Sonnenaufgang:<br>"
+    "Sonnenuntergang:"
     "</td><td>"
     "<br><input type=\"radio\" name=\"sunr\" value=\"1\"");
   if (settings.mySettings.ani_sunrise) message += F(" checked");
