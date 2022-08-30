@@ -21,10 +21,18 @@
 // ******************************************************************************
 // ******************************************************************************
 
-// Einstellungen für das Board: (LOLIN(WEMOS) D1 R2 & mini) (wichtig: Board Version 2.6.3 bis 2.7.4)
+// Einstellungen für das Board: (LOLIN(WEMOS) D1 R2 & mini)
 // CPU Frequenz auf 160 MHz
 // Flash Size 4MB ( FS:2MB OTA~1019KB)
 // SLL Support Basic
+
+// oder für ESP8266 EX: Board LOLIN(WEMOS) D1 pro
+// CPU Frequenz auf 160 MHz
+// Flash Size: 16MB ( FS:14MB OTA~1019KB)
+// Flash Mode: "DOUT(compatible)"
+// SLL Support Basic
+
+// wichtig: Board Version 2.6.3 bis 2.7.4
 
 // Im Normalbetrieb immer alle DEBUG Schalter aus. (configuration.h ab Zeile 305!)
 
@@ -57,7 +65,7 @@
 //Then search for SunRise using the search bar.
 //Click on the text area SunRise by Cyrus Rahman and then select the specific Version 2.0.2 and install it.
 
-#define FIRMWARE_VERSION 20211202 //Palindrom
+#define FIRMWARE_VERSION 20220603 
 
 #include <Arduino.h>
 #include <Arduino_JSON.h>
@@ -218,6 +226,7 @@ uint8_t autoMode = 0;
 boolean autoModeChangeFlag = false;
 bool MODE_BUTTON_BOOL = false;
 bool SHOW_TIME_BUTTON_BOOL = false;
+unsigned long show_off_on_time = 0;
 int ModeSequenz = 0;
 int modeExtraTime = 0;
 int Modecount = 0;
@@ -365,7 +374,7 @@ void setup()
 	Serial.println("Firmware: " + String(FIRMWARE_VERSION));
 #ifdef DEBUG
   Serial.printf("Size of Settings: %i byte\n",sizeof(settings));
-  Serial.printf("ESP BoardVersion: %s\n",ESP.getCoreVersion());
+  Serial.printf("ESP BoardVersion: %s\n",ESP.getCoreVersion().c_str());
 #endif
 
 #ifdef POWERON_SELFTEST
@@ -440,12 +449,22 @@ void setup()
   if ( settings.mySettings.corner_colorChange == COLORCHANGE_MAIN) settings.mySettings.corner_color = settings.mySettings.color;
 
 #ifdef AUDIO_SOUND
-  Serial.println(F("Setting up Audio Sound."));
+  Serial.print(F("Setting up Audio Sound."));
   pinMode(PIN_AUDIO_BUSY, INPUT);
   SoftSer.begin(9600);  // Einstellen der Baudrate auf 9600
 //  SoftSer.begin(9600,SWSERIAL_8N1,PIN_AUDIO_TX, PIN_AUDIO_RX,false, 128);
   delay(500);
   Mp3Player.begin(SoftSer); // Starten der seriellen Kommunikation zwischen dem D1 Mini und dem MP3 Modul.
+  Serial.print(F("."));
+  delay(500);
+  Serial.print(F("."));
+  delay(500);
+  Serial.print(F("."));
+  delay(500);
+  Serial.print(F("."));
+  delay(500);
+  Serial.println(F(". fertig!"));
+
   if ( settings.mySettings.sprecher )
   {
     ANSAGEBASE = AUDIO_BASENR_VICKI; //vicki
@@ -455,16 +474,11 @@ void setup()
     ANSAGEBASE = AUDIO_BASENR_HANS; //hans
   }
   Serial.printf("Ansagebase = %i \r\n", ANSAGEBASE);
-  Serial.println(F("Setting up Audio Sound. - fertig!"));
-  Mp3Player.volume(0);
-  Mp3Player.EQ(DFPLAYER_EQ_NORMAL);
-//   Mp3Player.EQ(DFPLAYER_EQ_POP);
-//  Mp3Player.EQ(DFPLAYER_EQ_ROCK);
-//  Mp3Player.EQ(DFPLAYER_EQ_JAZZ);
-//  Mp3Player.EQ(DFPLAYER_EQ_CLASSIC);
-//  Mp3Player.EQ(DFPLAYER_EQ_BASS);
-  delay(500);
-  Play_MP3(703,false,50); //Spiele mp3 Startup, Lautstärke 50   
+  Mp3Player.volume(1);
+  delay(100);
+  Mp3Player.EQ(AUDIO_EQUALIZER);
+  delay(100);
+  Play_MP3(703,false,STARTUPSOUNDLEVEL); //Spiele mp3 Startup  
 #endif
   delay (500);
   renderer.clearScreenBuffer(matrix);
@@ -509,7 +523,7 @@ void setup()
 		digitalWrite(PIN_BUZZER, LOW);
 #endif
 #if defined(AUDIO_SOUND) && defined(WIFI_BEEPS)
-  Play_MP3(ANSAGEBASE + 51,false,50); //Wlan nicht OK
+  Play_MP3(ANSAGEBASE + 51,false,STARTUPSOUNDLEVEL); //Wlan nicht OK
 #endif
     WiFi.mode(WIFI_AP);
 		delay(3000);
@@ -519,6 +533,8 @@ void setup()
 	{
 		WiFi.mode(WIFI_STA);
 		Serial.println(F("WLAN connected. Switching to STA mode."));
+    Serial.print(F("Aktuelle IP ist : "));
+    Serial.println(WiFi.localIP());
 		writeScreenBuffer(matrix, GREEN, brightness);
 #if defined(BUZZER) && defined(WIFI_BEEPS)
 		for (uint8_t i = 0; i <= 2; i++)
@@ -534,7 +550,7 @@ void setup()
 #endif
 #if defined(AUDIO_SOUND) && defined(WIFI_BEEPS)
   Serial.println(F("sprich: WLAN-verbunden."));
-  Play_MP3(ANSAGEBASE + 50,true,50); 
+  Play_MP3(ANSAGEBASE + 50,true,STARTUPSOUNDLEVEL); 
 #endif
 		delay(500);
 // Highscores aus EPROM holen
@@ -1516,26 +1532,41 @@ void loop()
 	// ************************************************************************
 	// Run always
 	// ************************************************************************
+
+// schaltet für ca. 3 sek die LEDs an
+  if (SHOW_TIME_BUTTON_BOOL && millis() > show_off_on_time + 3000 && mode != MODE_BLANK) {
+#ifdef DEBUG
+    Serial.println(F("Wieder aus nach 3 sek."));
+#endif
+    setMode(MODE_BLANK);
+    SHOW_TIME_BUTTON_BOOL = false;
+  }
+
+  
   if (MODE_BUTTON_BOOL) {
     MODE_BUTTON_BOOL = false;
-    if ( mode != MODE_TIME && mode < MODE_SECONDS ) 
-    {
-      buttonTimePressed();
+    if ( SHOW_TIME_BUTTON_BOOL ) {
+      SHOW_TIME_BUTTON_BOOL = false;
     }
     else
     {
-      buttonModePressed();
+      if ( !SHOW_TIME_BUTTON_BOOL && mode == MODE_BLANK ) 
+      {
+        show_off_on_time = millis();
+        SHOW_TIME_BUTTON_BOOL = true;
+      }
+      if ( mode != MODE_TIME && mode < MODE_SECONDS ) 
+      {
+        buttonTimePressed();
+      }
+      else
+      {
+        buttonModePressed();
+      }
     }
   }
 
 #ifdef SHOW_TIME_BUTTON
-// schaltet für ca. 2 sek die LEDs an
-  if (SHOW_TIME_BUTTON_BOOL && mode != MODE_BLANK) {
-    delay (2000);
-    setMode(MODE_BLANK);
-    SHOW_TIME_BUTTON_BOOL = false;
-  }
-  
   if (SHOW_TIME_BUTTON_BOOL && mode == MODE_BLANK) {
     setMode(MODE_TIME);
   }
@@ -1664,10 +1695,10 @@ void loop()
 // *********************************************************************
 // *********************************************************************
 	// Render a new screenbuffer if needed
+
 	if (screenBufferNeedsUpdate)
 	{
 		screenBufferNeedsUpdate = false;
-
 		// Save old screenbuffer
 		for (uint8_t i = 0; i <= 9; i++) matrixOld[i] = matrix[i];
     if ( mode != MODE_TIME ) ModeSequenz++;
@@ -2269,13 +2300,14 @@ void loop()
       {
         writeScreenBuffer(matrix, settings.mySettings.color, brightness);
       }
-#ifdef SHOW_TIME_BUTTON
+//#ifdef SHOW_TIME_BUTTON
       else if (SHOW_TIME_BUTTON_BOOL )
-      {
+      {         
         renderer.clearScreenBuffer(matrixOld);
+//        writeScreenBuffer(matrix, settings.mySettings.color, brightness);
         writeScreenBufferFade(matrixOld, matrix, settings.mySettings.color, brightness);
       }
-#endif
+//#endif
       else if ( playanimation )
       {
         if ( loadAnimation(animation) ) 
@@ -2553,6 +2585,7 @@ void loop()
 
   if ((millis() > (modeExtraTime + modeTimeout + SHOW_MODE_TIMEOUT)) && modeTimeout ) 
 	{
+  
     ModeSequenz = 0;
     if ( mode < MODE_SECONDS && !autoModeChangeFlag ) {
       setMode(mode++);
@@ -2569,6 +2602,9 @@ void loop()
   	  setMode(MODE_TIME);
       autoModeChangeFlag = false;
     }
+      #ifdef DEBUG
+        Serial.printf("2576: Mode: %i\n",mode);
+     #endif
 	}
 
 #ifdef DEBUG_FPS
@@ -3587,6 +3623,9 @@ void buttonTimePressed()
   }
   if ( mode == MODE_WHITE ) renderer.clearScreenBuffer(matrix);  
 	setMode(MODE_TIME);
+ #ifdef DEBUG
+   Serial.printf("modeTimeout: %i\r\n", modeTimeout);
+#endif
 }
 
 /******************************************************************************
@@ -3600,7 +3639,7 @@ void buttonModePressed()
 #endif
 
 #ifdef AUDIO_SOUND
-  Play_MP3(700,true,0); // OK Sound blub
+    Play_MP3(700,false,0); // OK Sound blub
 #endif
 	// Switch off alarm
 #ifdef BUZZER
@@ -3637,7 +3676,14 @@ void buttonModePressed()
   if ( mode == MODE_WHITE ) { 
     renderer.clearScreenBuffer(matrix);
   }
-	setMode(mode++);
+  if ( mode > MODE_COUNT || SHOW_TIME_BUTTON_BOOL ) { 
+    renderer.clearScreenBuffer(matrix);
+    setMode(MODE_TIME);
+  }
+  else
+  {
+	  setMode(mode++);
+  }
   Modecount++;
 }
 
@@ -3978,7 +4024,8 @@ ICACHE_RAM_ATTR void buttonShowTimeInterrupt()
 	if (millis() > lastButtonPress + 250)
 	{
 		lastButtonPress = millis();
-		SHOW_TIME_BUTTON_BOOL = true;
+		show_off_on_time = millis();
+    SHOW_TIME_BUTTON_BOOL = true;
 	}
 }
 #endif
@@ -4353,7 +4400,8 @@ void handleRoot()
 	message += F("<html><head>");
 	message +=	"<title>" + String(settings.mySettings.systemname) + "</title>";
 	message += F("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-		"<meta http-equiv=\"refresh\" content=\"60\" charset=\"UTF-8\">"
+		"<meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\"\n>"
+    "<meta http-equiv=\"refresh\" content=\"60\" charset=\"UTF-8\">\n"
     "<link rel=\"icon\" type=\"image/png\" sizes=\"192x192\"  href=\"/android-icon-192x192.png\">"
     "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"/favicon-32x32.png\">"
     "<link rel=\"icon\" type=\"image/png\" sizes=\"96x96\" href=\"/favicon-96x96.png\">"
@@ -4457,6 +4505,7 @@ message += F("<hr>\n");
 #endif
 
 // ################### sende html Teil 1
+webServer.sendHeader("Cache-Control", "no-cache");
 webServer.send(200, "text/html", message);
 message = "";
 delay(0);
@@ -4759,10 +4808,16 @@ message += F("</span>");
  message += F("\n<script>\n"
     "$(\"#button_zeit\").click(function() {"
       "$.post(\"/handleButtonTime\");"
-    "});"
+    "});\n"
     "$(\"#button_mode\").click(function() {"
       "$.post(\"/handleButtonMode\");"
-    "});"
+    "});\n"
+    "document.addEventListener(\"visibilitychange\", function() {"
+    "if (!document.hidden){"
+    " location.reload();"
+    "}"
+    "});\n"
+
     "</script>\n");
 
 // Ende Webserver
@@ -4883,7 +4938,9 @@ void debugClock()
    "<li>MaxFreeBlockSize: " + String(ESP.getMaxFreeBlockSize()) + " bytes</li>\n"
    "<li><small>MinFreeBlockSize: " + String(minFreeBlockSize) + "bytes Codezeile: " + String(codeline) + "</small></li>\n"
    "<li>HeapFragmentation: " + String(ESP.getHeapFragmentation()) + " %</li>\n"
-   "<li>CpuFreq: " + String(ESP.getCpuFreqMHz()) + " MHz</li>\n";
+   "<li>CpuFreq: " + String(ESP.getCpuFreqMHz()) + " MHz</li>\n"
+   "<li>FlashSize (real/ide): " + String(ESP.getFlashChipRealSize()/1024/1024) + "/" + String(ESP.getFlashChipSize()/1024/1024) + " MB</li>\n";
+   
   message += "<li>Reset Grund: " + ESP.getResetReason() + "</li>\n";
   message += F("</ul>\n"
     "</li>\n");  
@@ -6100,101 +6157,127 @@ void handleCommitSettings()
 #endif
 	// ------------------------------------------------------------------------
 #if defined(BUZZER) || defined(AUDIO_SOUND)
-	time_t alarmTimeFromWeb = 0;
-	webServer.arg("a1") == "0" ? settings.mySettings.alarm1 = false : settings.mySettings.alarm1 = true;
-	alarmTimeFromWeb = webServer.arg("a1t").substring(0, 2).toInt() * 3600 + webServer.arg("a1t").substring(3, 5).toInt() * 60;
-	if (settings.mySettings.alarm1Time != alarmTimeFromWeb)
-		settings.mySettings.alarm1 = true;
-	settings.mySettings.alarm1Time = alarmTimeFromWeb;
-	settings.mySettings.alarm1Weekdays =
-		webServer.arg("a1w1").toInt() +
-		webServer.arg("a1w2").toInt() +
-		webServer.arg("a1w3").toInt() +
-		webServer.arg("a1w4").toInt() +
-		webServer.arg("a1w5").toInt() +
-		webServer.arg("a1w6").toInt() +
-		webServer.arg("a1w7").toInt();
+	time_t alarmTimeFromWeb = 0; 
+//Alarm1
+	if ( webServer.arg("a1") == "0" ) settings.mySettings.alarm1 = false;
+	if ( webServer.arg("a1") == "1" ) settings.mySettings.alarm1 = true;
+
+  if (webServer.arg("a1t")!= "" )
+  {
+  	alarmTimeFromWeb = webServer.arg("a1t").substring(0, 2).toInt() * 3600 + webServer.arg("a1t").substring(3, 5).toInt() * 60;
+  	if (settings.mySettings.alarm1Time != alarmTimeFromWeb)
+  		settings.mySettings.alarm1 = true;
+  	settings.mySettings.alarm1Time = alarmTimeFromWeb;
+  	settings.mySettings.alarm1Weekdays =
+  		webServer.arg("a1w1").toInt() +
+  		webServer.arg("a1w2").toInt() +
+  		webServer.arg("a1w3").toInt() +
+  		webServer.arg("a1w4").toInt() +
+  		webServer.arg("a1w5").toInt() +
+  		webServer.arg("a1w6").toInt() +
+  		webServer.arg("a1w7").toInt();
+  }
 	// ------------------------------------------------------------------------
-	webServer.arg("a2") == "0" ? settings.mySettings.alarm2 = false : settings.mySettings.alarm2 = true;
-	alarmTimeFromWeb = webServer.arg("a2t").substring(0, 2).toInt() * 3600 + webServer.arg("a2t").substring(3, 5).toInt() * 60;
-	if (settings.mySettings.alarm2Time != alarmTimeFromWeb)
-		settings.mySettings.alarm2 = true;
-	settings.mySettings.alarm2Time = alarmTimeFromWeb;
-	settings.mySettings.alarm2Weekdays =
-		webServer.arg("a2w1").toInt() +
-		webServer.arg("a2w2").toInt() +
-		webServer.arg("a2w3").toInt() +
-		webServer.arg("a2w4").toInt() +
-		webServer.arg("a2w5").toInt() +
-		webServer.arg("a2w6").toInt() +
-		webServer.arg("a2w7").toInt();
+//Alarm2
+	if ( webServer.arg("a2") == "0" ) settings.mySettings.alarm2 = false;
+	if ( webServer.arg("a2") == "1" ) settings.mySettings.alarm2 = true;
+  if (webServer.arg("a2t")!= "" )
+  {
+  	alarmTimeFromWeb = webServer.arg("a2t").substring(0, 2).toInt() * 3600 + webServer.arg("a2t").substring(3, 5).toInt() * 60;
+  	if (settings.mySettings.alarm2Time != alarmTimeFromWeb)
+  		settings.mySettings.alarm2 = true;
+  	settings.mySettings.alarm2Time = alarmTimeFromWeb;
+  	settings.mySettings.alarm2Weekdays =
+  		webServer.arg("a2w1").toInt() +
+  		webServer.arg("a2w2").toInt() +
+  		webServer.arg("a2w3").toInt() +
+  		webServer.arg("a2w4").toInt() +
+  		webServer.arg("a2w5").toInt() +
+  		webServer.arg("a2w6").toInt() +
+  		webServer.arg("a2w7").toInt();
+  }
 	// ------------------------------------------------------------------------
-	webServer.arg("hb") == "0" ? settings.mySettings.hourBeep = false : settings.mySettings.hourBeep = true;
+// Stundenschlag
+	if ( webServer.arg("hb") == "0" ) settings.mySettings.hourBeep = false;
+	if ( webServer.arg("hb") == "1" ) settings.mySettings.hourBeep = true;
 	// ------------------------------------------------------------------------
-	if (webServer.arg("ti").toInt())
-	{
-		alarmTimer = webServer.arg("ti").toInt();
-		alarmTimerSecond = second();
-		alarmTimerSet = true;
-		setMode(MODE_TIMER);
-	}
+//Timer
+	if (webServer.arg("ti") != "")
+  {
+    if ( webServer.arg("ti").toInt() ) 
+  	{
+  		alarmTimer = webServer.arg("ti").toInt();
+  		alarmTimerSecond = second();
+  		alarmTimerSet = true;
+  		setMode(MODE_TIMER);
+  	}
+  }
 #endif
 #ifdef AUDIO_SOUND
-  webServer.arg("hb") == "0" ? settings.mySettings.hourBeep = false : settings.mySettings.hourBeep = true;
-  settings.mySettings.volume = webServer.arg("vol").toInt();
-  
-  if ( webServer.arg("srand") == "0" ) settings.mySettings.randomsound = false; else settings.mySettings.randomsound = true;
-  
+// Lautstärke
+  if ( webServer.arg("vol") != "" ) settings.mySettings.volume = webServer.arg("vol").toInt();
+// Zufallssound
+  if ( webServer.arg("srand") == "0" ) settings.mySettings.randomsound = false;
+  if ( webServer.arg("srand") == "1" ) settings.mySettings.randomsound = true;
+
+// Stundensound für Wochentage
   for ( uint8_t wti = 0; wti < 7; wti++)
   {
-    settings.mySettings.weekdaysoundfile[wti] = webServer.arg("wsf" + String(wti)).toInt();
+    if ( webServer.arg("wsf" + String(wti)) != "" ) settings.mySettings.weekdaysoundfile[wti] = webServer.arg("wsf" + String(wti)).toInt();
   }
-  
-   if ( webServer.arg("sprech") == "1" ) 
-   {
-     settings.mySettings.sprecher = true; 
-     ANSAGEBASE = AUDIO_BASENR_VICKI;
-   }
-   else 
-   {
-     settings.mySettings.sprecher = false;
-     ANSAGEBASE = AUDIO_BASENR_HANS;
-   }
+//Sprecher  
+  if ( webServer.arg("sprech") == "1" ) 
+  {
+    settings.mySettings.sprecher = true; 
+    ANSAGEBASE = AUDIO_BASENR_VICKI;
+  }
+  if ( webServer.arg("sprech") == "0" ) 
+  {
+    settings.mySettings.sprecher = false;
+    ANSAGEBASE = AUDIO_BASENR_HANS;
+  }
 #ifdef DEBUG
-    Serial.printf("ANSAGEBASE: %i\r\n", ANSAGEBASE);
+  Serial.printf("ANSAGEBASE: %i\r\n", ANSAGEBASE);
 #endif
 
-if ( webServer.arg("wsl") == "0" ) settings.mySettings.weekendlater = false; else settings.mySettings.weekendlater = true;
-
-if ( webServer.arg("vh24") == "0" ) settings.mySettings.vickihans24h = false; else settings.mySettings.vickihans24h = true;
+// Wochenend später lauter
+  if ( webServer.arg("wsl") == "0" ) settings.mySettings.weekendlater = false;
+  if ( webServer.arg("wsl") == "1" ) settings.mySettings.weekendlater = true;
+// 12/24 Stunden Ansage
+  if ( webServer.arg("vh24") == "0" ) settings.mySettings.vickihans24h = false; 
+  if ( webServer.arg("vh24") == "1" ) settings.mySettings.vickihans24h = true;
 
 #endif
-	// ------------------------------------------------------------------------
-#if defined(RTC_BACKUP) || defined(SENSOR_BME280)
-	webServer.arg("mc") == "0" ? settings.mySettings.modeChange = false : settings.mySettings.modeChange = true;
+// ------------------------------------------------------------------------
+// AutoModeChange / AutoModeChange Timer
+	if ( webServer.arg("mc") == "0" ) settings.mySettings.modeChange = false;
   if ( webServer.arg("mc") == "1" ) 
   { 
+    settings.mySettings.modeChange = true;
     settings.mySettings.auto_mode_change = webServer.arg("amct").toInt();
     if ( autoModeChangeTimer > settings.mySettings.auto_mode_change * 60 ) autoModeChangeTimer = settings.mySettings.auto_mode_change * 60 ;
   }
-#endif
 // ------------------------------------------------------------------------
 #if defined(SunRiseLib) || defined(APIKEY)
-  webServer.arg("sunr") == "0" ? settings.mySettings.ani_sunrise = false : settings.mySettings.ani_sunrise = true;
-  webServer.arg("suns") == "0" ? settings.mySettings.ani_sunset = false : settings.mySettings.ani_sunset = true;
+// Sunrise/ Sunset
+  if ( webServer.arg("sunr") == "0" ) settings.mySettings.ani_sunrise = false;
+  if ( webServer.arg("sunr") == "1" ) settings.mySettings.ani_sunrise = true;
+  if ( webServer.arg("suns") == "0" ) settings.mySettings.ani_sunset = false;
+  if ( webServer.arg("suns") == "1" ) settings.mySettings.ani_sunset = true;
 #endif
-
-	// ------------------------------------------------------------------------
-  settings.mySettings.brightness = webServer.arg("br").toInt();
+// ------------------------------------------------------------------------
+// Helligkeit in Prozent
+  if ( webServer.arg("br") != "" ) settings.mySettings.brightness = webServer.arg("br").toInt();
   
   // ------------------------------------------------------------------------
 #ifdef LDR
+// ABC
 	if (webServer.arg("ab") == "0")
 	{
 		settings.mySettings.useAbc = false;
     brightness = map(settings.mySettings.brightness, 10, 100, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
 	}
-	else
+	if (webServer.arg("ab") == "1")
   {
     abcBrightness = map(settings.mySettings.brightness, 10, 100, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
 		settings.mySettings.useAbc = true;
@@ -6207,108 +6290,130 @@ if ( webServer.arg("vh24") == "0" ) settings.mySettings.vickihans24h = false; el
   brightness = abcBrightness;
 #endif
 
-	// ------------------------------------------------------------------------
-
-	settings.mySettings.color = webServer.arg("co").toInt();
-  settings.mySettings.corner_color = webServer.arg("cco").toInt();
-	// ------------------------------------------------------------------------
-	switch (webServer.arg("cc").toInt())
-	{
-	case 0: settings.mySettings.colorChange = COLORCHANGE_NO;   break;
-	case 1: settings.mySettings.colorChange = COLORCHANGE_FIVE; break;
-	case 2: settings.mySettings.colorChange = COLORCHANGE_HOUR; break;
-	case 3: settings.mySettings.colorChange = COLORCHANGE_DAY;  break;
-	}
-  // ------------------------------------------------------------------------
-  switch (webServer.arg("ccc").toInt())
+// ------------------------------------------------------------------------
+//Hauptfarbe
+	if ( webServer.arg("co") != "" ) settings.mySettings.color = webServer.arg("co").toInt();
+//Minutenfarbe
+  if ( webServer.arg("cco") != "" ) settings.mySettings.corner_color = webServer.arg("cco").toInt();
+// ------------------------------------------------------------------------
+// Farbwechsel
+  if ( webServer.arg("cc") != "")
   {
-  case 0: settings.mySettings.corner_colorChange = COLORCHANGE_NO;   break;
-  case 1: settings.mySettings.corner_colorChange = COLORCHANGE_FIVE; break;
-  case 2: settings.mySettings.corner_colorChange = COLORCHANGE_HOUR; break;
-  case 3: settings.mySettings.corner_colorChange = COLORCHANGE_DAY;  break;
-  case 4: settings.mySettings.corner_colorChange = COLORCHANGE_MAIN; break;
+  	switch (webServer.arg("cc").toInt())
+  	{
+  	case 0: settings.mySettings.colorChange = COLORCHANGE_NO;   break;
+  	case 1: settings.mySettings.colorChange = COLORCHANGE_FIVE; break;
+  	case 2: settings.mySettings.colorChange = COLORCHANGE_HOUR; break;
+  	case 3: settings.mySettings.colorChange = COLORCHANGE_DAY;  break;
+  	}
   }
-  if ( settings.mySettings.corner_colorChange == COLORCHANGE_MAIN) settings.mySettings.corner_color = settings.mySettings.color;
-  // ------------------------------------------------------------------------
+// ------------------------------------------------------------------------
+// Farbwechsel Minutenfarbe
+  if ( webServer.arg("ccc") != "")
+  {
+    switch (webServer.arg("ccc").toInt())
+    {
+    case 0: settings.mySettings.corner_colorChange = COLORCHANGE_NO;   break;
+    case 1: settings.mySettings.corner_colorChange = COLORCHANGE_FIVE; break;
+    case 2: settings.mySettings.corner_colorChange = COLORCHANGE_HOUR; break;
+    case 3: settings.mySettings.corner_colorChange = COLORCHANGE_DAY;  break;
+    case 4: settings.mySettings.corner_colorChange = COLORCHANGE_MAIN; break;
+    }
+    if ( settings.mySettings.corner_colorChange == COLORCHANGE_MAIN) settings.mySettings.corner_color = settings.mySettings.color;
+  }
+// ------------------------------------------------------------------------
+// Hintergrundfarbe Modus
+  if ( webServer.arg("bgce") == "0" ) settings.mySettings.enable_bg_color = 0; 
   if ( webServer.arg("bgce") == "1" ) settings.mySettings.enable_bg_color = 1; 
-  else if ( webServer.arg("bgce") == "2" ) settings.mySettings.enable_bg_color = 2; 
-  else settings.mySettings.enable_bg_color = 0;
-  String farbwert = webServer.arg("bgc");
-  farbwert.toUpperCase();
-  settings.mySettings.bg_color = string_to_num(farbwert);
-	// ------------------------------------------------------------------------
-	switch (webServer.arg("tr").toInt())
-	{
-	case 0: settings.mySettings.transition = TRANSITION_NORMAL; break;
-	case 1: settings.mySettings.transition = TRANSITION_FARBENMEER; break;
-  case 2: settings.mySettings.transition = TRANSITION_MOVEUP;   break;
-  case 3: settings.mySettings.transition = TRANSITION_MOVEDOWN; break;
-	case 4: settings.mySettings.transition = TRANSITION_MOVELEFT;   break;
-  case 5: settings.mySettings.transition = TRANSITION_MOVERIGHT; break;
-  case 6: settings.mySettings.transition = TRANSITION_MOVELEFTDOWN; break;
-  case 7: settings.mySettings.transition = TRANSITION_MOVERIGHTDOWN; break;
-  case 8: settings.mySettings.transition = TRANSITION_MOVECENTER;   break;
-  case 9: settings.mySettings.transition = TRANSITION_FADE;   break;
-  case 10: settings.mySettings.transition = TRANSITION_MATRIX;   break;
-  case 11: settings.mySettings.transition = TRANSITION_SPIRALE_LINKS;   break;
-  case 12: settings.mySettings.transition = TRANSITION_SPIRALE_RECHTS;   break;
-  case 13: settings.mySettings.transition = TRANSITION_ZEILENWEISE;   break;
-  case 14: settings.mySettings.transition = TRANSITION_REGENBOGEN;   break;
-  case 15: settings.mySettings.transition = TRANSITION_MITTE_LINKSHERUM;   break;
-  case 16: settings.mySettings.transition = TRANSITION_QUADRATE;   break;
-  
-  case 20: settings.mySettings.transition = TRANSITION_ALLE_NACHEINANDER;   break;
-  case 21: settings.mySettings.transition = TRANSITION_RANDOM;   break;
-  
-	}
-	// ------------------------------------------------------------------------
-	//settings.mySettings.timeout = webServer.arg("to").toInt();
-	// ------------------------------------------------------------------------
-	settings.mySettings.nightOffTime = webServer.arg("no").substring(0, 2).toInt() * 3600 + webServer.arg("no").substring(3, 5).toInt() * 60;
-	// ------------------------------------------------------------------------
-	settings.mySettings.dayOnTime = webServer.arg("do").substring(0, 2).toInt() * 3600 + webServer.arg("do").substring(3, 5).toInt() * 60;
-	// ------------------------------------------------------------------------
-	webServer.arg("ii") == "0" ? settings.mySettings.itIs = false : settings.mySettings.itIs = true;
-	// ------------------------------------------------------------------------
+  if ( webServer.arg("bgce") == "2" ) settings.mySettings.enable_bg_color = 2;
+// Hintergrundfarbe
+  if ( webServer.arg("bgc") != "")
+  {
+    String farbwert = webServer.arg("bgc");
+    farbwert.toUpperCase();
+    settings.mySettings.bg_color = string_to_num(farbwert);
+  }
+// ------------------------------------------------------------------------
+// Transitions
+  if ( webServer.arg("tr") != "" )
+  {
+  	switch (webServer.arg("tr").toInt())
+  	{
+  	case 0: settings.mySettings.transition = TRANSITION_NORMAL; break;
+  	case 1: settings.mySettings.transition = TRANSITION_FARBENMEER; break;
+    case 2: settings.mySettings.transition = TRANSITION_MOVEUP;   break;
+    case 3: settings.mySettings.transition = TRANSITION_MOVEDOWN; break;
+  	case 4: settings.mySettings.transition = TRANSITION_MOVELEFT;   break;
+    case 5: settings.mySettings.transition = TRANSITION_MOVERIGHT; break;
+    case 6: settings.mySettings.transition = TRANSITION_MOVELEFTDOWN; break;
+    case 7: settings.mySettings.transition = TRANSITION_MOVERIGHTDOWN; break;
+    case 8: settings.mySettings.transition = TRANSITION_MOVECENTER;   break;
+    case 9: settings.mySettings.transition = TRANSITION_FADE;   break;
+    case 10: settings.mySettings.transition = TRANSITION_MATRIX;   break;
+    case 11: settings.mySettings.transition = TRANSITION_SPIRALE_LINKS;   break;
+    case 12: settings.mySettings.transition = TRANSITION_SPIRALE_RECHTS;   break;
+    case 13: settings.mySettings.transition = TRANSITION_ZEILENWEISE;   break;
+    case 14: settings.mySettings.transition = TRANSITION_REGENBOGEN;   break;
+    case 15: settings.mySettings.transition = TRANSITION_MITTE_LINKSHERUM;   break;
+    case 16: settings.mySettings.transition = TRANSITION_QUADRATE;   break;
+    
+    case 20: settings.mySettings.transition = TRANSITION_ALLE_NACHEINANDER;   break;
+    case 21: settings.mySettings.transition = TRANSITION_RANDOM;   break;
+    
+  	}
+  }
+// ------------------------------------------------------------------------
+// Nachts aus Zeit
+  if ( webServer.arg("no") != "" )	settings.mySettings.nightOffTime = webServer.arg("no").substring(0, 2).toInt() * 3600 + webServer.arg("no").substring(3, 5).toInt() * 60;
+// ------------------------------------------------------------------------
+// Tag ein Zeit
+	if ( webServer.arg("do") != "" ) settings.mySettings.dayOnTime = webServer.arg("do").substring(0, 2).toInt() * 3600 + webServer.arg("do").substring(3, 5).toInt() * 60;
+// ------------------------------------------------------------------------
+// Zeige "ES IST"
+	if ( webServer.arg("ii") == "0" ) settings.mySettings.itIs = false;
+	if ( webServer.arg("ii") == "1" ) settings.mySettings.itIs = true;
+// ------------------------------------------------------------------------
+// NTP-Server 
   if ( webServer.arg("ntphost").length() && webServer.arg("ntphost") != settings.mySettings.ntphost )
   {
     webServer.arg("ntphost").toCharArray(settings.mySettings.ntphost,webServer.arg("ntphost").length()+1);
     strcpy(ntpServer,settings.mySettings.ntphost);
     aktntptime = true;
   }
-  // ------------------------------------------------------------------------  
+// ------------------------------------------------------------------------  
+// Systemname
   if ( webServer.arg("sysname").length() && webServer.arg("sysname") != settings.mySettings.systemname )
   {
     webServer.arg("sysname").toCharArray(settings.mySettings.systemname,webServer.arg("sysname").length()+1);
   }
-  // ------------------------------------------------------------------------  
-  // openweatherapikey
+// ------------------------------------------------------------------------  
+// openweatherapikey
   if ( webServer.arg("owkey").length() && webServer.arg("owkey") != settings.mySettings.openweatherapikey )
   {
     webServer.arg("owkey").toCharArray(settings.mySettings.openweatherapikey,webServer.arg("owkey").length()+1);
   }
-  //openweatherlocation
+//openweatherlocation
   if ( webServer.arg("owloc").length() && webServer.arg("owloc") != settings.mySettings.openweatherlocation )
   {
     webServer.arg("owloc").toCharArray(settings.mySettings.openweatherlocation,webServer.arg("owloc").length()+1);
   }
-  //hoehe_ueber_0
+//hoehe_ueber_0
   if ( webServer.arg("hoehe").length() && webServer.arg("hoehe").toInt() != settings.mySettings.standort_hoehe )
   {
     settings.mySettings.standort_hoehe = webServer.arg("hoehe").toInt();
   }
-  // Standort
+// Standort
   if ( webServer.arg("latitude").length() )
   {
     settings.mySettings.latitude = webServer.arg("latitude").toDouble();
   }
-  
   if ( webServer.arg("longitude").length() )
   {
     settings.mySettings.longitude = webServer.arg("longitude").toDouble();
   }
     
-  // ------------------------------------------------------------------------
+// ------------------------------------------------------------------------
+// Setze /Datum/Uhrzeit
 	if (webServer.arg("st").length())
 	{
 		Serial.println(webServer.arg("st"));
@@ -6325,15 +6430,28 @@ if ( webServer.arg("vh24") == "0" ) settings.mySettings.vickihans24h = false; el
     highscore[TETRIS] = 0;
     highscore[BRICKS] = 0;
     highscore[VIERGEWINNT] = 0;
+  
+    settings.mySettings.highscore[SNAKE] = highscore[SNAKE];
+    settings.mySettings.highscore[TETRIS] = highscore[TETRIS];
+    settings.mySettings.highscore[BRICKS] = highscore[BRICKS];
+    settings.mySettings.highscore[VIERGEWINNT] = highscore[VIERGEWINNT];
   }
-  settings.mySettings.highscore[SNAKE] = highscore[SNAKE];
-  settings.mySettings.highscore[TETRIS] = highscore[TETRIS];
-  settings.mySettings.highscore[BRICKS] = highscore[BRICKS];
-  settings.mySettings.highscore[VIERGEWINNT] = highscore[VIERGEWINNT];
-	settings.saveToEEPROM();
-	callRoot();
+  if ( webServer.args() < 10 )
+  {
+    webServer.send(200, "text/plain", "Parameter gesetzt!");
+  }
+  else
+  {
+// Sichern der Einstellungen
+	  settings.saveToEEPROM();
+	  callRoot();
+  }
 	screenBufferNeedsUpdate = true;
 }
+//------------------------------------------------------------------------
+// Ende handleCommitSettings()
+//------------------------------------------------------------------------
+
 
 // Page reboot
 void handleReboot()
